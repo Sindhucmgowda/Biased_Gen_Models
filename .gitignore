@@ -1,0 +1,17 @@
+__pycache__
+figs/
+*.ipynb
+.vscode
+*.pyc
+*.aux 
+*.fdb_latexmk 
+*.log 
+*.fls 
+*.synctex.gz
+*.mat
+*.png
+*.jpg
+*.tex
+*.pdf
+*.pth
+*.txt
