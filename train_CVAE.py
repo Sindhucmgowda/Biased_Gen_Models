@@ -5,14 +5,17 @@ import argparse
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+
 from torchvision import transforms
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
 from collections import defaultdict
-from utils import tile
+import numpy as np 
+
+from utils import tile, idx2onehot
 import pdb 
 from data.data_MNIST import MNIST, trans_col_MNIST, trans_MNIST, add_conf, data_lab_MNIST 
-from models.VAE_models import VAE
+from models.VAE_models import *
 
 def main(args):
 
@@ -40,12 +43,26 @@ def main(args):
 
         return KL_div
 
+    encoder_z = Encoder_Z(
+            args.encoder_lsizes_z, args.latent_size_z, conditional=False, num_labels=10).to(device)
+    encoder_w = Encoder_W(args.encoder_lsizes_w, args.latent_size_w, conditional=True, num_labels=10).to(device)
+        
+        ##decoders 
+    decoder_x = Decoder_X(
+            args.decoder_lsizes_x, args.latent_size_z, False, True, args.latent_size_w).to(device)
+    decoder_y_z = Decoder_Y(
+            args.decoder_lsizes_y, args.latent_size_z, num_labels=10).to(device)
     
+    ## trying this out newly 
+    # decoder_y_w = Decoder_Y(
+    #         args.decoder_lsizes_y, args.latent_size_w, num_labels=10).to(device)
 
 
-    optimizer1 = torch.optim.Adam(chain(decoder_x.parameters(), 
-                encoder_w.parameters(), encoder_z.parameters()), lr=1e-3)
+    optimizer1 = torch.optim.Adam(list(decoder_x.parameters()) + list( 
+                encoder_w.parameters()) +list(encoder_z.parameters()), lr=1e-3)
     optimizer2 = torch.optim.Adam(decoder_y.parameters(), lr=1e-3)
+    # optimizer3 = torch.optim.Adam(decoder_y_w.parameters(), lr=1e-3)    
+    
     logs = defaultdict(list)
 
     for epoch in range(args.epochs):
@@ -57,29 +74,32 @@ def main(args):
             x, y = x.to(device), y.to(device)
 
             mu_z, logvar_z, z = encoder_z(x)
-            mu_w, logvar_w, w = encoder_w(x, y.unsqueeze(-1).float())
+            mu_w, logvar_w, w = encoder_w(x, y)
 
-            mu_x, logvar_x, pred_x = decoder_x(w, z)
+            pred_x = decoder_x(z, w)
             pred_y = decoder_y(z)
 
-            kl1 = KL(mu_w, logvar_w, torch.zeros_like(mu_w), torch.ones_like(logvar_w) * np.log(0.01))
-            kl0 = KL(mu_w, logvar_w, torch.ones_like(mu_w) * 3., torch.zeros_like(logvar_w))
-
+            kl_y = KL(mu_w, logvar_w, y.unsqueeze(-1)*torch.ones_like(mu_w), torch.ones_like(logvar_w) * np.log(0.01))
+            
             optimizer1.zero_grad()
-            loss1 = ( torch.sum((x - mu_x) ** 2, -1)
-                    + torch.where(y == 1, kl1, kl0)
+            loss1 = ( torch.nn.functional.mse_loss(pred_x, x, reduction='sum')
+                    + kl_y
                     + KL(mu_z, logvar_z, torch.zeros_like(mu_z), torch.zeros_like(logvar_z))
                     + torch.sum(pred_y * torch.log(pred_y), -1)).sum()  # maximize entropy, enforce uniform distribution
+            
             loss1.backward(retain_graph=True)
             optimizer1.step()
                 
             optimizer2.zero_grad()
-            loss2 = (100. * torch.where(y == 1, -torch.log(pred_y[:, 1]), -torch.log(pred_y[:, 0]))).sum()
+            y_onehot = idx2onehot(y, n=10)
+            loss2 = 100*(y_onehot*pred_y).sum()
+            # loss2 = (100. * torch.where(y == 1, -torch.log(pred_y[:, 1]), -torch.log(pred_y[:, 0]))).sum()
             loss2.backward()
             optimizer2.step()
 
             loss = loss1 + loss2
             logs['loss'].append(loss.item())
+            logs['counts'].append(epoch*int(len(data_loader)/args.batch_size) + iteration)
 
             print("Epoch {:02d}/{:02d} Batch {:04d}/{:d}, Loss {:9.4f}".format(
                     epoch, args.epochs, iteration, len(data_loader)-1, loss.item()))
@@ -104,7 +124,7 @@ def main(args):
                             0, 0, "c={:d}".format(y[p].item()), color='black',
                             backgroundcolor='white', fontsize=8)
                
-                    ax_1.imshow(recon_x[p].permute(1,2,0).cpu().data.numpy())
+                    ax_1.imshow(pred_x[p].permute(1,2,0).cpu().data.numpy())
                     ax_1.axis('off')
 
                 os.makedirs(os.path.join(args.fig_root, str(ts)), exist_ok=True)
@@ -117,37 +137,21 @@ def main(args):
                 plt.close('all')
 
                 with torch.no_grad():
-                    zs, _, _ = encoder_z(torch.from_numpy(xs))
-                    ws, _, _ = encoder_w(torch.from_numpy(xs), torch.from_numpy(ys).unsqueeze(-1).float())
-                    pred_x, _, _ = decoder_x(ws, zs)
-                    pred_x = pred_x.cpu().numpy()
-                
-                if args.conditional:
-                    y = torch.arange(0, 10).long().unsqueeze(1).to(device)
-                    z = torch.randn([c.size(0), args.latent_size]).to(device)
-                    x_recon = vae.inference(z, c=c)
-                else:
-                    z = torch.randn([10, args.latent_size]).to(device)
-                    x = vae.inference(z)
-                
+                    c = torch.arange(0, 10).long().unsqueeze(1).to(device)
+                    sam_z = torch.randn([c.size(0), args.latent_size_z]).to(device)
+                    sam_w = (c*torch.ones([c.size(0), args.latent_size_w]) + torch.randn([c.size(0), args.latent_size_w])).to(device)
+                    # sam_w = torch.zeros([c.size(0), args.latent_size_w]).to(device)
+                    pred_x_sam = decoder_x(z,w)
+                     
                 plt.figure()
                 plt.figure(figsize=(5, 10))
                 
-                # for i,p in enumerate([0,1]):
                 for p in range(10):
-                    # plt.subplot(5, 2, i+1)
                     plt.subplot(5, 2, p+1)
-                    if args.conditional:
-                        plt.text(
-                            0, 0, "c={:d}".format(c[p].item()), color='black',
+                    plt.text(0, 0, "c={:d}".format(c[p].item()), color='black',
                             backgroundcolor='white', fontsize=8)
-                    plt.imshow(x[p].permute(1,2,0).cpu().data.numpy())
+                    plt.imshow(pred_x_sam[p].permute(1,2,0).cpu().data.numpy())
                     plt.axis('off')
-
-                if not os.path.exists(os.path.join(args.fig_root, str(ts))):
-                    if not(os.path.exists(os.path.join(args.fig_root))):
-                        os.mkdir(os.path.join(args.fig_root))
-                    os.mkdir(os.path.join(args.fig_root, str(ts)))
 
                 plt.savefig(
                     os.path.join(args.fig_root, str(ts),
@@ -155,30 +159,39 @@ def main(args):
                     dpi=300)
                 plt.clf()
                 plt.close('all')
+        
+        plt.figure()
+        plt.plot(logs['counts'],logs['loss'])
+        plt.savefig(os.path.join(args.fig_root, str(ts),"loss"))
+        plt.clf()
 
-        t.set_postfix(loss=loss.item(), y_max=pred_y.max().item(), y_min=pred_y.min().item())
-    
-    
-    
-
-
+    os.makedirs(os.path.join('/scratch/gobi2/sindhu/gen/vae/', args.model_path), exist_ok=True)
     torch.save({
-                'state_dict': vae.state_dict()
+                'state_dict_decoder_x': decoder_x.state_dict(),
+                'state_dict_decoder_y': decoder_y.state_dict(),
+                'state_dict_encoder_w': encoder_w.state_dict(),
+                'state_dict_encoder_z': encoder_z.state_dict(),
             }, f'{args.model_path}')
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed",'-s', type=int, default=0)
-    parser.add_argument("--epochs",'-e', type=int, default=10)
-    parser.add_argument("--batch_size",'-b', type=int, default=64)
+    parser.add_argument("--epochs",'-e', type=int, default=1)
+    parser.add_argument("--batch_size",'-b', type=int, default=128)
     parser.add_argument("--learning_rate", type=float, default=0.001)
-    parser.add_argument("--encoder_layer_sizes", type=list, default=[784,256,100,50])
-    parser.add_argument("--decoder_layer_sizes", type=list, default=[50,100,256,784])
-    parser.add_argument("--latent_size",'-ls',type=int, default=10)
+    parser.add_argument("--encoder_lsizes_z", type=list, default=[784,256,100,50])
+    parser.add_argument("--decoder_lsizes_x", type=list, default=[50,100,256,784])
+    
+    parser.add_argument("--encoder_lsizes_w", type=list, default=[75,50])
+    parser.add_argument("--decoder_lsizes_y", type=list, default=[50,100,256,784])
+    
+    parser.add_argument("--latent_size_z",'-lsz',type=int, default=10)
+    parser.add_argument("--latent_size_w",'-lsw',type=int, default=2)
+
     parser.add_argument("--print_every", type=int, default=100)
     parser.add_argument("--fig_root",'-f', type=str, default='figs')
-    parser.add_argument("--model_path",'-m', type=str, default='model')
+    parser.add_argument("--model_path",'-m', type=str, default='trail')
     parser.add_argument("--conditional", '-c', action='store_true')
     parser.add_argument("--interventional", '-i', action='store_true')
     parser.add_argument("--consub", '-cs', action='store_true')

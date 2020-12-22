@@ -153,12 +153,19 @@ class Encoder_Z(nn.Module):
                 nn.ReLU()
             ])
         layers.extend([ 
-                nn.Linear(layer_sizes[-1],hidden_size/4)
+                nn.Linear(layer_sizes[-1],int(hidden_size/4))
         ])
 
         self.fc = nn.Sequential(*layers) 
-        self.linear_means = nn.Linear(hidden_size/4, latent_size)
-        self.linear_log_var = nn.Linear(hidden_size/4, latent_size)
+        self.linear_means = nn.Linear(int(hidden_size/4), latent_size)
+        self.linear_log_var = nn.Linear(int(hidden_size/4), latent_size)
+
+    def reparameterize(self, mu, log_var):
+
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+
+        return mu + eps * std
 
     def forward(self, x, c=None):
 
@@ -171,7 +178,9 @@ class Encoder_Z(nn.Module):
         means = self.linear_means(x)
         log_vars = self.linear_log_var(x)
 
-        return means, log_vars
+        z_sam = self.reparameterize(means, log_vars)
+
+        return means, log_vars, z_sam 
 
 class Encoder_W(nn.Module):
 
@@ -205,12 +214,19 @@ class Encoder_W(nn.Module):
                 ])
             # last layer
             layers.extend([ 
-                    nn.Linear(layer_sizes[-1],hidden_size/4)
+                    nn.Linear(layer_sizes[-1],int(hidden_size/4))
             ])
 
             self.fc = nn.Sequential(*layers) 
-            self.linear_means = nn.Linear(hidden_size/4, latent_size)
-            self.linear_log_var = nn.Linear(hidden_size/4, latent_size)
+            self.linear_means = nn.Linear(int(hidden_size/4), latent_size)
+            self.linear_log_var = nn.Linear(int(hidden_size/4), latent_size)
+
+    def reparameterize(self, mu, log_var):
+
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+
+        return mu + eps * std
 
     def forward(self, x, c=None):
 
@@ -222,8 +238,10 @@ class Encoder_W(nn.Module):
         means = self.linear_means(x)
         log_vars = self.linear_log_var(x)
 
-        return means, log_vars
+        w_sam = self.reparameterize(means, log_vars) 
 
+        return means, log_vars, w_sam 
+    
 class Decoder_X(nn.Module):
 
     def __init__(self, layer_sizes, latent_size, conditional, subspace, num_labels):
@@ -231,10 +249,10 @@ class Decoder_X(nn.Module):
         super().__init__()
 
         self.num_labels = num_labels 
-
+        self.subspace = subspace 
 
         self.conditional = conditional
-        if self.conditional:
+        if self.conditional or self.subspace: 
             layer_sizes[0] = latent_size + num_labels
         else:
             layer_sizes[0] = latent_size
@@ -303,6 +321,8 @@ class Decoder_Y(nn.Module):
         self.fc = nn.Sequential(*layers) 
     
     def forward(self, z):
-        y = F.softmax(self.fc(z))
+
+        y = self.fc(z)
+        y = F.softmax(y, dim=1)
         
         return y 
