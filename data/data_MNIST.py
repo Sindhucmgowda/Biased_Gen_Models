@@ -236,7 +236,7 @@ def add_conf(index_n_labels,p,qyu,N):
 
     py_u = np.array([np.repeat(1-qyu, len(np.unique(lab_all))), np.repeat(1-qyu, len(np.unique(lab_all)))])
 
-    # pdb.set_trace()
+    pdb.set_trace()
                 
     N_bar = len(lab_all)
     
