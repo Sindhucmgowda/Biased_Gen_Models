@@ -30,7 +30,7 @@ def main(args):
     ts = time.time()
 
     index_n_labels, index_n_labels_v =  data_lab_MNIST(split='train')    
-    labels_conf = add_conf(index_n_labels,p=0.5,qyu=0.90,N=45000)
+    labels_conf = add_conf(index_n_labels,p=0.5,qyu=0.90,N=50000)
 
     dataset = MNIST(labels = labels_conf, conf=0, conf_type='colour',
                                 transform = trans_col_MNIST, data_ty='training', per_digit=False)
@@ -81,8 +81,12 @@ def main(args):
             pred_y_w = decoder_y_w(w)
 
             y_onehot = idx2onehot(y, n=10)
-            w_bk = ((y_onehot*pred_y_w).sum(dim=1)).pow(-1).unsqueeze(-1)
 
+            if args.interventional: 
+                w_bk = ((y_onehot*pred_y_w).sum(dim=1)).pow(-1).unsqueeze(-1) ## p(y = c/w)^(-1) weights for the bkdoor case  
+            else: 
+                w_bk = torch.ones(pred_y_w.shape[0],1) 
+            
             # pdb.set_trace()
 
             kl_y = KL(mu_w, logvar_w, y.unsqueeze(-1)*torch.ones_like(mu_w), torch.zeros_like(logvar_w), weights=w_bk)
@@ -200,11 +204,11 @@ if __name__ == '__main__':
     parser.add_argument("--decoder_lsizes_y", type=list, default=[50,100,256,784])
     
     parser.add_argument("--latent_size_z",'-lsz',type=int, default=10)
-    parser.add_argument("--latent_size_w",'-lsw',type=int, default=2)
+    parser.add_argument("--latent_size_w",'-lsw',type=int, default=10)
 
     parser.add_argument("--print_every", type=int, default=100)
-    parser.add_argument("--fig_root",'-f', type=str, default='figs')
-    parser.add_argument("--model_path",'-m', type=str, default='trail')
+    parser.add_argument("--fig_root",'-f', type=str, default='figs/debug')
+    parser.add_argument("--model_path",'-m', type=str, default='debug')
     parser.add_argument("--conditional", '-c', action='store_true')
     parser.add_argument("--interventional", '-i', action='store_true')
     parser.add_argument("--consub", '-cs', action='store_true')

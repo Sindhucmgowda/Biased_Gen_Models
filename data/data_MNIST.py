@@ -31,44 +31,6 @@ def colorDigit(img, color=[255, 0, 0]):
     
     return img
 
-# if __name__ == '__main__':
-#     # x = np.zeros( (32, 32), dtype=np.uint8)
-#     # x[:4,:4] = 255
-#     x = sko.imread('sample_image.png')
-#     x = colorDigit(x[:, :, 0])
-#     sko.imsave('test.png', x)
-
-class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=1.):
-        self.std = std
-        self.mean = mean
-        
-    def __call__(self, tensor):
-        try:
-            return tensor + torch.randn(tensor.size()) * self.std + self.mean
-        except:
-            print('Could not add Gaussian Noise')
-            return tensor
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-def trans_noisy_MNIST(x,rot,tra):
-
-    tsfrm = transforms.ToPILImage()
-    img_org = tsfrm(x)
-
-    # img = img_org.transform(img_org.size, Image.AFFINE, (1,0,0,0,1,tra*128))
-    img = img_org.transform(img_org.size, Image.AFFINE, (1,0,tra*128,0,1,0))
-    img = img.rotate(angle=rot)
-
-    tsfrm = transforms.Compose([
-                                # transforms.ToPILImage(),
-                                # transforms.Resize((128, 128)),
-                                transforms.ToTensor(),
-                                AddGaussianNoise(0,0.2)])
-    return tsfrm(img)
-
 def trans_MNIST(x, rot=0, tra=0):
     # tsfrm = transforms.Compose([transforms.ToPILImage(),
     #                             transforms.Resize((128, 128))])
@@ -228,46 +190,29 @@ def data_lab_MNIST(split='train'):
 
 def add_conf(index_n_labels,p,qyu,N):
 
-    # pdb.set_trace()
-    # pu_y = np.array([1-qyu, qyu])
-
     lab_all = np.array(list(index_n_labels.values()))
     filename = np.array(list(index_n_labels.keys()))
 
-    py_u = np.array([np.repeat(1-qyu, len(np.unique(lab_all))), np.repeat(1-qyu, len(np.unique(lab_all)))])
+    yr = np.unique(lab_all)
 
-    pdb.set_trace()
-                
-    N_bar = len(lab_all)
-    
-    Ns = int(0.1*N) 
+    # Ns = rand.multinomial(N,[0.1,0.2,0.1,0.05,0.05,0.1,0.1,0.1,0.1],1)    
+    Ns = int(p*N) ## taking equal probabily 
+    pu_y = np.array([np.repeat(1-qyu, len(np.unique(lab_all))), np.repeat(qyu, len(np.unique(lab_all)))]) ## keeping probability of bias for each class to be the same   
 
-    Y = np.zeros(N)
-    U = rand.binomial(1,0.96,N)
-
-    for i in range(N):
-        Y[i] = np.where(rand.multinomial(1,py_u[U[i]]))[0][0]
-    
-    idn = list(np.where(Y==0)[0]) + list(np.where(Y==1)[0]) + list(np.where(Y==2)[0]) + list(np.where(Y==3)[0]) + list(np.where(Y==4)[0]) + \
-        list(np.where(Y==5)[0]) + list(np.where(Y==6)[0]) + list(np.where(Y==7)[0]) + list(np.where(Y==8)[0]) + list(np.where(Y==9)[0]) 
-    
-    idx = list(np.where(lab_all==0)[0][:Ns]) + list(np.where(lab_all==1)[0][:Ns]) + list(np.where(lab_all==2)[0][:Ns]) + list(np.where(lab_all==3)[0][:Ns]) + \
-            list(np.where(lab_all==4)[0][:Ns]) + list(np.where(lab_all==5)[0][:Ns]) + list(np.where(lab_all==6)[0][:Ns]) + list(np.where(lab_all==7)[0][:Ns]) + \
-                list(np.where(lab_all==8)[0][:Ns]) + list(np.where(lab_all==9)[0][:Ns]) 
-
-    Y = Y[idn];  U = U[idn]  
-    
-    # pdb.set_trace()    
-    U = np.array(U, dtype=int); Y = np.array(Y, dtype=int) 
+    idx = []
+    for n in yr: 
+        idx += list(np.where(lab_all==n)[0][:Ns])   
     idx = np.array(idx)    
 
-    # confounded data 
-    filename_conf = filename[idx]
-    Y_conf = Y; U_conf = U
+    Y = lab_all[idx]
+    U = rand.binomial(1,pu_y[1,Y])
+
+    U = np.array(U, dtype=int); Y = np.array(Y, dtype=int) 
+
+    filename_conf = filename[idx]; Y_conf = Y; U_conf = U
     labels_conf = np.array([filename_conf, Y_conf, U_conf]).transpose(1,0)
 
     return labels_conf   
-
 
 # def add_conf(index_n_labels,p=0.5,qyu=0.95,N=8000):
     
@@ -307,8 +252,6 @@ def add_conf(index_n_labels,p,qyu,N):
 #     labels_conf = np.array([filename_conf, Y_conf, U_conf]).transpose(1,0)
     
 #     return labels_conf
-
-
 
 # if __name__ == "__main__":
 
